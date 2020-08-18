@@ -2,6 +2,8 @@
 import codecs
 import importlib
 import time
+import itertools
+
 from anki.tags import TagManager
 
 from functools import partial
@@ -197,8 +199,10 @@ def updateNotes(allDb):
     frequencyListPath = cfg('path_frequency')
     try:
         with codecs.open(frequencyListPath, encoding='utf-8') as f:
-            frequency_list = [line.strip().split('\t')[0]
-                              for line in f.readlines()]
+            # create a dictionary. key is word, value is its position in the file
+            frequency_list = dict(zip(
+                [line.strip().split('\t')[0] for line in f.readlines()],
+                itertools.count(0)))
     except FileNotFoundError:
         frequency_list = []
 
@@ -282,13 +286,13 @@ def updateNotes(allDb):
                 usefulness += C('priority.db weight')
             focusMorphString = focusMorph.base
             try:
-                focusMorphIndex = frequency_list.index(focusMorphString)
+                focusMorphIndex = frequency_list[focusMorphString]
                 isFrequency = True
 
                 # The bigger this number, the lower mmi becomes
                 usefulness += int(round( frequencyBonus * (1 - focusMorphIndex / frequencyListLength) ))
 
-            except ValueError:
+            except KeyError:
                 pass
 
         # average frequency of unknowns (ie. how common the word is within your collection)
@@ -389,11 +393,11 @@ def updateNotes(allDb):
             csum = fieldChecksum(fs[0])
             sfld = stripHTML(fs[getSortFieldIndex(mid)])
             ds.append(
-                {'now': now, 'tags': tags_, 'flds': flds_, 'sfld': sfld, 'csum': csum, 'usn': mw.col.usn(), 'nid': nid})
+                (tags_, flds_, sfld, csum, now, mw.col.usn(), nid))
 
     mw.progress.update(label='Updating anki database...')
     mw.col.db.executemany(
-        'update notes set tags=:tags, flds=:flds, sfld=:sfld, csum=:csum, mod=:now, usn=:usn where id=:nid', ds)
+        'update notes set tags=?, flds=?, sfld=?, csum=?, mod=?, usn=? where id=?', ds)
 
     # Now reorder new cards based on MMI
     mw.progress.update(label='Updating new card ordering...')
@@ -406,11 +410,11 @@ def updateNotes(allDb):
         if nid in nid2mmi:  # owise it was disabled
             due_ = nid2mmi[nid]
             if due != due_:  # only update cards that have changed
-                ds.append({'now': now, 'due': due_,
-                           'usn': mw.col.usn(), 'cid': cid})
+                ds.append((due_, now,
+                           mw.col.usn(), cid))
 
     mw.col.db.executemany(
-        'update cards set due=:due, mod=:now, usn=:usn where id=:cid', ds)
+        'update cards set due=?, mod=?, usn=? where id=?', ds)
     mw.reset()
 
     printf('Updated notes in %f sec' % (time.time() - t_0))
